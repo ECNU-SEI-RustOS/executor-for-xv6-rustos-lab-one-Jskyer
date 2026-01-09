@@ -569,7 +569,7 @@ impl Proc {
                 Ok(ret) => ret as i32,
                 Err(()) => -1,
             };
-            println!("{} {}: {} -> {}", pid, syscall_name, a7, return_value);
+            println!("{}: syscall {} -> {}", pid, syscall_name, return_value);
         }
 
         tf.a0 = match sys_result {
