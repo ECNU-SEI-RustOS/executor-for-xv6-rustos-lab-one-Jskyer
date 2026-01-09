@@ -102,6 +102,9 @@ pub struct ProcData {
     pub pagetable: Option<Box<PageTable>>,
     /// 进程当前工作目录的 inode。
     pub cwd: Option<Inode>,
+
+    // 进程的追踪掩码，每一位代表一个系统调用是否需要追踪。
+    pub trace_mask: i32,
 }
 
 
@@ -116,6 +119,7 @@ impl ProcData {
             tf: ptr::null_mut(),
             pagetable: None,
             cwd: None,
+            trace_mask: 0,
         }
     }
 
@@ -383,6 +387,31 @@ pub struct Proc {
     pub killed: AtomicBool,
 }
 
+pub const SYSCALL_NAMES: [&str; 22] = [
+    "fork",      // 1
+    "exit",      // 2
+    "wait",      // 3
+    "pipe",      // 4
+    "read",      // 5
+    "kill",      // 6
+    "exec",      // 7
+    "fstat",     // 8
+    "chdir",     // 9
+    "dup",       // 10
+    "getpid",    // 11
+    "sbrk",      // 12
+    "sleep",     // 13
+    "uptime",    // 14
+    "open",      // 15
+    "write",     // 16
+    "mknod",     // 17
+    "unlink",    // 18
+    "link",      // 19
+    "mkdir",     // 20
+    "close",     // 21
+    "trace",     // 22
+];
+
 impl Proc {
     pub const fn new(index: usize) -> Self {
         Self {
@@ -520,10 +549,29 @@ impl Proc {
             19 => self.sys_link(),
             20 => self.sys_mkdir(),
             21 => self.sys_close(),
+            22 => self.sys_trace(),
             _ => {
                 panic!("unknown syscall num: {}", a7);
             }
         };
+
+        // 获取追踪掩码和进程ID
+        let proc_data = self.data.get_mut();
+        let trace_mask = proc_data.trace_mask;
+        let pid = self.excl.lock().pid;
+
+        // 检查是否需要追踪此系统调用
+        if (trace_mask & (1 << a7)) != 0 {
+            let syscall_name = SYSCALL_NAMES.get((a7 as usize) - 1)
+                .copied()
+                .unwrap_or("unknown");
+            let return_value = match sys_result {
+                Ok(ret) => ret as i32,
+                Err(()) => -1,
+            };
+            println!("{} {}: {} -> {}", pid, syscall_name, a7, return_value);
+        }
+
         tf.a0 = match sys_result {
             Ok(ret) => ret,
             Err(()) => -1isize as usize,
@@ -690,6 +738,9 @@ impl Proc {
         
         // copy process name
         cdata.name.copy_from_slice(&pdata.name);
+
+        // copy trace mask
+        cdata.trace_mask = pdata.trace_mask;
 
         let cpid = cexcl.pid;
 
